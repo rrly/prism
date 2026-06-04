@@ -31,6 +31,11 @@ let lockFlash    = null;    // {x1,y1,x2,y2,alpha} brief confirmation flash
 let wipeMode     = false;
 let lockGestureActive = false;
 
+// Dimensions state
+let dimCorners = null;  // [4] lerped quad corners, null until first frame
+let dimStars   = [];    // hyperspace star streak particles
+let dimLastT   = 0;     // previous frame time for dt
+
 // FPS
 let fps = 0, fpsCount = 0, fpsLast = 0;
 
@@ -47,6 +52,7 @@ window.addEventListener('load', () => {
   offCanvas = document.createElement('canvas');
   offCtx = offCanvas.getContext('2d');
   initParticles();
+  initDimStars();
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
@@ -56,6 +62,7 @@ window.addEventListener('load', () => {
     if (e.key === '3') setMode('prism');
     if (e.key === '4') setMode('glitch');
     if (e.key === '5') setMode('pixelate');
+    if (e.key === '6') setMode('dimensions');
     if ((e.key === '+' || e.key === '=') && mode === 'pixelate') { pixelSize = Math.min(32, pixelSize + 2); document.getElementById('pxval').textContent = pixelSize; }
     if (e.key === '-' && mode === 'pixelate') { pixelSize = Math.max(4, pixelSize - 2); document.getElementById('pxval').textContent = pixelSize; }
     if ((e.key === 'c' || e.key === 'C') && mode === 'pixelate') { pixelWindows = []; lockFlash = null; document.getElementById('pxwins').textContent = 0; }
@@ -142,7 +149,8 @@ const modeInfo = {
   sphere:   { label: 'SPHERE', sub: 'Hand-Tracked Energy Vortex' },
   glitch:   { label: 'GLITCH', sub: 'Hand-Tracked Corruption Window' },
   pixelate: { label: 'PIXEL',  sub: 'Retro Pixelation' },
-  prism:    { label: 'PRISM',  sub: 'Crystal Refraction' },
+  prism:      { label: 'PRISM',      sub: 'Crystal Refraction' },
+  dimensions: { label: 'DIMENSIONS', sub: 'Hyperspace Portal' },
 };
 
 function setMode(m) {
@@ -199,8 +207,9 @@ function renderLoop(ts) {
     case 'sphere':   renderSphere(t, W, H); break;
     case 'prism':    renderPrism(t, W, H);  break;
     case 'glitch':   renderGlitch(t, W, H); break;
-    case 'pixelate': renderPixelate(t, W, H); break;
-    default:         drawRawFingerCursor(W, H); break;
+    case 'pixelate':   renderPixelate(t, W, H);   break;
+    case 'dimensions': renderDimensions(t, W, H); break;
+    default:           drawRawFingerCursor(W, H); break;
   }
 
   checkHandHover(t, W, H);
@@ -1322,5 +1331,290 @@ function checkHandHover(t, W, H) {
     foundEl.classList.remove('hover-select');
     hoverButton = null;
     timerEl.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════
+// ⊕ DIMENSIONS EFFECT — hyperspace portal
+// ═══════════════════════════════════════════════
+
+function initDimStars() {
+  dimStars = [];
+  for (let i = 0; i < 220; i++) dimStars.push(newDimStar());
+}
+
+function newDimStar() {
+  return {
+    angle:       Math.random() * Math.PI * 2,
+    dist:        Math.random() * 14,               // starts close to center
+    speed:       130 + Math.random() * 420,        // wider speed range — more variety
+    size:        0.3 + Math.random() * 3.5,        // some stars are chunky
+    colorOffset: Math.floor(Math.random() * 360),
+    bright:      0.5 + Math.random() * 0.5,
+  };
+}
+
+// Gently breathing rectangular idle quad (shown when no hands detected)
+function idleQuadCorners(t, W, H) {
+  const cx = W * 0.5, cy = H * 0.5;
+  const rx = W * 0.28, ry = H * 0.30;
+  const wb = 0.04 * Math.sin(t * 0.55);
+  return [
+    { x: cx - rx * (1 + wb), y: cy - ry * (1 - wb) },  // [0] top-left
+    { x: cx + rx * (1 - wb), y: cy - ry * (1 + wb) },  // [1] top-right
+    { x: cx + rx * (1 + wb), y: cy + ry * (1 - wb) },  // [2] bottom-right
+    { x: cx - rx * (1 - wb), y: cy + ry * (1 + wb) },  // [3] bottom-left
+  ];
+}
+
+function renderDimensions(t, W, H) {
+  // dt capped at 50 ms so large pauses don't teleport stars
+  const dt = Math.min(t - dimLastT, 0.05);
+  dimLastT = t;
+
+  const hands = handsResult && handsResult.multiHandLandmarks;
+  const hasHands = hands && hands.length >= 2;
+
+  // ── Determine target quad corners ─────────────
+  // Corner order: [0] h1-thumb, [1] h1-index, [2] h2-index, [3] h2-thumb
+  // Tracing [0]→[1]→[2]→[3]→[0] forms a natural window when both hands are raised.
+  let targetCorners;
+  if (hasHands) {
+    const h1 = hands[0], h2 = hands[1];
+    targetCorners = [
+      { x: (1 - h1[4].x) * W, y: h1[4].y * H },
+      { x: (1 - h1[8].x) * W, y: h1[8].y * H },
+      { x: (1 - h2[8].x) * W, y: h2[8].y * H },
+      { x: (1 - h2[4].x) * W, y: h2[4].y * H },
+    ];
+  } else {
+    targetCorners = idleQuadCorners(t, W, H);
+  }
+
+  // Lerp each corner toward its target
+  const lk = hasHands ? 0.16 : 0.05;
+  if (!dimCorners) {
+    dimCorners = targetCorners.map(p => ({ ...p }));
+  } else {
+    for (let i = 0; i < 4; i++) {
+      dimCorners[i].x += (targetCorners[i].x - dimCorners[i].x) * lk;
+      dimCorners[i].y += (targetCorners[i].y - dimCorners[i].y) * lk;
+    }
+  }
+
+  const C = dimCorners;
+  const cx = (C[0].x + C[1].x + C[2].x + C[3].x) / 4;
+  const cy = (C[0].y + C[1].y + C[2].y + C[3].y) / 4;
+  // Portal "radius" — furthest corner from center, used to scale star distances
+  const qr = Math.max(...C.map(p => Math.hypot(p.x - cx, p.y - cy)));
+
+  // Hue cycles aggressively — full spectrum sweep every ~4 seconds
+  const hue = (t * 90 + 210) % 360;
+
+  // Active vs idle intensity — only the idle branch changes; active values stay as-is
+  const warpLayers = hasHands ? 12   : 4;
+  const warpScale  = hasHands ? 0.15 : 0.05;
+  const warpAlpha  = hasHands ? 0.22 : 0.07;
+  const nebulaRate = hasHands ? 1.0  : 0.22;   // orbit speed multiplier
+  const starAccel  = hasHands ? 9.0  : 1.8;    // radial acceleration multiplier
+  const pulseFreq  = hasHands ? 16.0 : 3.5;    // core pulse Hz
+  const flareScale = hasHands ? 0.75 : 0.25;   // flare arm length as fraction of qr
+
+  // ── Inside the quad ───────────────────────────
+  ctx.save();
+  if (!hasHands) ctx.globalAlpha = 0.16;
+
+  // Clip to the (potentially irregular) quadrilateral
+  ctx.beginPath();
+  ctx.moveTo(C[0].x, C[0].y);
+  ctx.lineTo(C[1].x, C[1].y);
+  ctx.lineTo(C[2].x, C[2].y);
+  ctx.lineTo(C[3].x, C[3].y);
+  ctx.closePath();
+  ctx.clip();
+
+  // (0) Inverted webcam base — overwrite normal webcam within the quad with inverted colors
+  ctx.save();
+  ctx.filter = 'invert(1)';
+  ctx.translate(W, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, W, H);
+  ctx.restore();
+
+  // (A) Speed-warp blur — 12 zoom copies, large scale jumps for extreme tunnel feel
+  // Snapshot taken after inversion so warp trails are also inverted
+  offCtx.clearRect(0, 0, W, H);
+  offCtx.drawImage(canvas, 0, 0);
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let layer = warpLayers; layer >= 1; layer--) {
+    const scale = 1 + layer * warpScale;
+    const a = Math.max(0, warpAlpha - layer * 0.016);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
+    ctx.drawImage(offCanvas, 0, 0);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // (B) Deep space vignette — very dark edges to sell the tunnel depth
+  const vig = ctx.createRadialGradient(cx, cy, qr * 0.08, cx, cy, qr * 1.35);
+  vig.addColorStop(0,   'rgba(0,0,18,0.00)');
+  vig.addColorStop(0.45,'rgba(0,0,22,0.45)');
+  vig.addColorStop(1,   'rgba(0,0,40,0.95)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  // (C) Nebula cloud overlays — 8 high-saturation blobs, fast orbit, thick opacity
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 8; i++) {
+    const ang = t * (0.14 + i * 0.07) * nebulaRate + i * (Math.PI * 2 / 8);
+    const nx  = cx + Math.cos(ang) * qr * 0.48;
+    const ny  = cy + Math.sin(ang) * qr * 0.38;
+    const nr  = qr * (0.60 + i * 0.12);
+    const ch  = (hue + i * 45) % 360;
+    const g   = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+    g.addColorStop(0,   `hsla(${ch},100%,68%,0.42)`);
+    g.addColorStop(0.40,`hsla(${ch},100%,50%,0.18)`);
+    g.addColorStop(1,   'transparent');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+
+  // (D) Star streaks — massive particle count, extreme acceleration, wide bright trails
+  for (let i = dimStars.length - 1; i >= 0; i--) {
+    const s = dimStars[i];
+    const prev = s.dist;
+    s.dist += s.speed * dt * (1 + prev / qr * starAccel);
+    if (s.dist > qr * 1.35) { dimStars[i] = newDimStar(); continue; }
+
+    const x1 = cx + Math.cos(s.angle) * prev;
+    const y1 = cy + Math.sin(s.angle) * prev;
+    const x2 = cx + Math.cos(s.angle) * s.dist;
+    const y2 = cy + Math.sin(s.angle) * s.dist;
+
+    const nd = s.dist / qr;
+    const a  = Math.min(1, nd * 5.0) * s.bright;   // fade in faster, hit full brightness sooner
+    const w  = s.size * (0.5 + nd * 9.0);           // much wider at edge — dramatic tail
+    const sh = (hue + s.colorOffset) % 360;
+
+    const gr = ctx.createLinearGradient(x1, y1, x2, y2);
+    gr.addColorStop(0, `hsla(${sh},100%,95%,0)`);
+    gr.addColorStop(1, `hsla(${sh},100%,100%,${a})`);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+    ctx.strokeStyle = gr; ctx.lineWidth = w; ctx.stroke();
+  }
+  while (dimStars.length < 380) dimStars.push(newDimStar());
+
+  // (E) Warp core — massive pulsing singularity, high-frequency pulse
+  const pulse = 0.55 + 0.45 * Math.sin(t * pulseFreq);
+  const coreR = qr * 0.26 * pulse;
+  const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 7);
+  cg.addColorStop(0,    `rgba(255,255,255,${1.0 * pulse})`);
+  cg.addColorStop(0.05, `hsla(${hue},100%,98%,${0.90 * pulse})`);
+  cg.addColorStop(0.18, `hsla(${hue},100%,80%,0.65)`);
+  cg.addColorStop(0.45, `hsla(${(hue+55)%360},100%,55%,0.30)`);
+  cg.addColorStop(0.80, `hsla(${(hue+120)%360},100%,35%,0.12)`);
+  cg.addColorStop(1,    'transparent');
+  ctx.beginPath(); ctx.arc(cx, cy, coreR * 7, 0, Math.PI * 2);
+  ctx.fillStyle = cg; ctx.fill();
+
+  // (F) 6-arm lens flare — long, thick, blinding
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const flareLen = qr * flareScale * pulse;
+  for (let arm = 0; arm < 6; arm++) {
+    const a = (arm / 6) * Math.PI;
+    const fg = ctx.createLinearGradient(
+      cx - Math.cos(a) * flareLen, cy - Math.sin(a) * flareLen,
+      cx + Math.cos(a) * flareLen, cy + Math.sin(a) * flareLen
+    );
+    fg.addColorStop(0,   'transparent');
+    fg.addColorStop(0.5, `rgba(255,255,255,${0.90 * pulse})`);
+    fg.addColorStop(1,   'transparent');
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(a) * flareLen, cy - Math.sin(a) * flareLen);
+    ctx.lineTo(cx + Math.cos(a) * flareLen, cy + Math.sin(a) * flareLen);
+    ctx.strokeStyle = fg;
+    ctx.lineWidth = 3.5 + pulse * 5.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.restore(); // ── end clip ──────────────────────────────────
+
+  // ── Quad edges — glowing electric outline ─────
+
+  // Massive layered bloom — 5 blurred passes at increasing width
+  ctx.save();
+  ctx.filter = 'blur(18px)';
+  for (let b = 5; b >= 1; b--) {
+    ctx.beginPath();
+    ctx.moveTo(C[0].x, C[0].y); ctx.lineTo(C[1].x, C[1].y);
+    ctx.lineTo(C[2].x, C[2].y); ctx.lineTo(C[3].x, C[3].y);
+    ctx.closePath();
+    ctx.strokeStyle = `hsla(${hue},100%,80%,${0.22 / b})`;
+    ctx.lineWidth = b * 28;
+    ctx.stroke();
+  }
+  ctx.filter = 'none';
+  ctx.restore();
+
+  // Solid glowing edge — thick, bright
+  ctx.save();
+  ctx.shadowColor = `hsl(${hue},100%,85%)`;
+  ctx.shadowBlur = 40;
+  ctx.strokeStyle = `hsla(${hue},100%,96%,0.95)`;
+  ctx.lineWidth = 3.0;
+  ctx.beginPath();
+  ctx.moveTo(C[0].x, C[0].y); ctx.lineTo(C[1].x, C[1].y);
+  ctx.lineTo(C[2].x, C[2].y); ctx.lineTo(C[3].x, C[3].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  // Animated dashed edge on top — faster march
+  ctx.save();
+  ctx.shadowColor = `hsl(${(hue+60)%360},100%,90%)`;
+  ctx.shadowBlur = 16;
+  ctx.strokeStyle = `hsla(${(hue+60)%360},100%,98%,0.75)`;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 4]);
+  ctx.lineDashOffset = -(t * 160 % 20);
+  ctx.beginPath();
+  ctx.moveTo(C[0].x, C[0].y); ctx.lineTo(C[1].x, C[1].y);
+  ctx.lineTo(C[2].x, C[2].y); ctx.lineTo(C[3].x, C[3].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── Fingertip corner markers ───────────────────
+  if (hasHands) {
+    for (const lm of hands) {
+      for (const idx of [4, 8]) {
+        const kx = (1 - lm[idx].x) * W, ky = lm[idx].y * H;
+        ctx.beginPath(); ctx.arc(kx, ky, 12, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${hue},100%,82%,0.18)`; ctx.fill();
+        ctx.beginPath(); ctx.arc(kx, ky, 5.5, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${hue},100%,95%,0.92)`; ctx.fill();
+      }
+    }
+  }
+
+  // ── Hint when no hands ─────────────────────────
+  if (!hasHands) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.13)';
+    ctx.font = '10px JetBrains Mono,monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('· raise both hands · thumb + index of each hand mark the portal corners ·', W / 2, H - 28);
+    ctx.textAlign = 'left';
+    ctx.restore();
   }
 }
