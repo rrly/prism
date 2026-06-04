@@ -1,0 +1,192 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #040812;
+  --surface: rgba(255,255,255,0.04);
+  --border: rgba(255,255,255,0.07);
+  --cyan: #00f0ff;
+  --purple: #9b5de5;
+  --pink: #f72585;
+  --green: #00ff88;
+  --text: #dde4ee;
+  --dim: rgba(221,228,238,0.45);
+}
+
+html, body { width:100%; height:100%; background:#000; color:var(--text); font-family:'JetBrains Mono',monospace; overflow:hidden; }
+
+/* Centers the stage with black letterbox bars when aspect ratio doesn't match */
+#app {
+  position:fixed; inset:0; z-index:1;
+  display:flex; align-items:center; justify-content:center;
+  background:#000;
+}
+
+/* ─── HEADER ─── */
+#header {
+  position:absolute; top:0; left:0; right:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 22px; z-index:20;
+  background:linear-gradient(to bottom, rgba(0,0,0,0.42) 0%, transparent 100%);
+  backdrop-filter:blur(3px);
+}
+
+.logo {
+  font-family:'Orbitron',sans-serif; font-weight:900; font-size:18px;
+  letter-spacing:7px; color:var(--cyan);
+  text-shadow:0 0 18px rgba(0,240,255,0.6), 0 0 40px rgba(0,240,255,0.2);
+}
+.logo em { color:var(--dim); font-style:normal; font-weight:400; font-size:13px; letter-spacing:3px; }
+
+#live-badge {
+  display:flex; align-items:center; gap:8px;
+  padding:5px 13px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:100px; font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+  color:var(--dim); transition:all 0.4s;
+}
+#live-badge.on { border-color:rgba(0,255,136,0.4); color:var(--green); }
+#live-dot {
+  width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.15);
+  transition:all 0.4s;
+}
+#live-badge.on #live-dot {
+  background:var(--green);
+  box-shadow:0 0 8px rgba(0,255,136,0.9);
+  animation:blink 2s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ─── CANVAS AREA ─── */
+/* As large as possible while preserving 16:9 — constrained by whichever
+   viewport dimension runs out first */
+#stage {
+  position:relative;
+  width:min(100vw, calc(100vh * 16 / 9));
+  aspect-ratio:16 / 9;
+  overflow:hidden;
+  flex-shrink:0;
+}
+
+/* Scan line sweep when live */
+#scanline {
+  position:absolute; left:0; right:0; height:1px;
+  background:linear-gradient(90deg, transparent 0%, var(--cyan) 40%, var(--cyan) 60%, transparent 100%);
+  opacity:0; z-index:9; pointer-events:none;
+  animation:scan 3.5s linear infinite;
+}
+#stage.live #scanline { opacity:0.25; }
+@keyframes scan { 0%{top:0} 100%{top:100%} }
+
+#video { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+#canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+/* Placeholder */
+#placeholder {
+  position:absolute; inset:0; z-index:15;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
+  background:rgba(4,8,18,0.97);
+}
+.ph-icon {
+  font-size:52px; opacity:0.15;
+  animation:ph-pulse 3s ease-in-out infinite;
+}
+@keyframes ph-pulse { 0%,100%{opacity:0.1} 50%{opacity:0.2} }
+.ph-text { font-size:11px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; }
+#init-btn {
+  margin-top:4px; padding:11px 30px;
+  background:transparent; border:1px solid var(--cyan);
+  color:var(--cyan); font-family:'Orbitron',sans-serif;
+  font-size:11px; letter-spacing:3px; text-transform:uppercase;
+  cursor:pointer; border-radius:4px;
+  transition:all 0.2s;
+}
+#init-btn:hover { background:rgba(0,240,255,0.08); box-shadow:0 0 22px rgba(0,240,255,0.3); }
+
+/* ─── MODE TAG ─── */
+#mode-tag {
+  position:absolute; top:60px; right:20px; z-index:20;
+  text-align:right; pointer-events:none;
+  opacity:0; transition:opacity 0.5s;
+}
+#mode-tag.show { opacity:1; }
+#mode-label {
+  font-family:'Orbitron',sans-serif; font-size:20px; font-weight:700;
+  letter-spacing:5px; text-transform:uppercase;
+  color:var(--cyan); text-shadow:0 0 16px rgba(0,240,255,0.6);
+}
+#mode-sub { font-size:9px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; margin-top:3px; }
+
+/* ─── HAND STATUS (sphere / prism mode) ─── */
+#hand-status {
+  position:absolute; top:60px; left:20px; z-index:20;
+  display:flex; flex-direction:column; gap:7px;
+  pointer-events:none; opacity:0; transition:opacity 0.4s;
+}
+#hand-status.show { opacity:1; }
+.hs-row { display:flex; align-items:center; gap:8px; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; color:var(--dim); }
+.hs-dot { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,0.1); transition:all 0.3s; }
+.hs-dot.on { background:var(--cyan); box-shadow:0 0 7px var(--cyan); }
+
+/* ─── SCAN HINT (sphere / prism, no hands) ─── */
+#scan-hint {
+  position:absolute; bottom:90px; left:50%; transform:translateX(-50%);
+  z-index:20; pointer-events:none; opacity:0; transition:opacity 0.5s;
+  text-align:center;
+}
+#scan-hint.show { opacity:1; }
+.sh-text {
+  font-size:10px; letter-spacing:3px; color:var(--dim);
+  text-transform:uppercase; animation:sh-fade 2s ease-in-out infinite;
+}
+@keyframes sh-fade { 0%,100%{opacity:0.4} 50%{opacity:1} }
+
+/* ─── FPS ─── */
+#fps { position:absolute; bottom:88px; left:18px; z-index:20; font-size:9px; letter-spacing:1px; color:rgba(255,255,255,0.18); pointer-events:none; }
+
+/* ─── CONTROLS ─── */
+#controls {
+  position:absolute; bottom:0; left:0; right:0;
+  display:flex; align-items:flex-end; justify-content:center;
+  padding:16px 20px 20px; gap:9px; z-index:20;
+  background:linear-gradient(to top, rgba(0,0,0,0.38) 0%, transparent 100%);
+}
+
+.btn {
+  display:flex; flex-direction:column; align-items:center; gap:7px;
+  padding:12px 16px; min-width:82px;
+  background:rgba(0,0,0,0.30); border:1px solid rgba(255,255,255,0.14);
+  border-radius:9px; color:var(--dim); cursor:pointer;
+  transition:all 0.22s cubic-bezier(0.4,0,0.2,1);
+  font-family:'JetBrains Mono',monospace; backdrop-filter:blur(12px);
+}
+.btn:hover { background:rgba(255,255,255,0.10); border-color:rgba(255,255,255,0.22); color:var(--text); transform:translateY(-3px); }
+.btn.active { background:rgba(0,240,255,0.13); border-color:rgba(0,240,255,0.55); color:var(--cyan); box-shadow:0 0 18px rgba(0,240,255,0.2), inset 0 0 12px rgba(0,240,255,0.06); }
+.btn.hover-select { background:rgba(0,240,255,0.2) !important; border-color:rgba(0,240,255,0.75) !important; color:var(--cyan) !important; box-shadow:0 0 28px rgba(0,240,255,0.35) !important; transform:translateY(-2px); }
+.btn-ico { font-size:20px; line-height:1; }
+.btn-lbl { font-size:9px; letter-spacing:2.5px; text-transform:uppercase; }
+
+/* ─── HAND-HOVER COUNTDOWN TIMER ─── */
+#hover-timer {
+  position:absolute; z-index:50;
+  width:54px; height:54px;
+  transform:translate(-50%,-50%);
+  pointer-events:none; display:none;
+}
+#hover-timer svg { width:54px; height:54px; overflow:visible; }
+.ht-bg  { fill:none; stroke:rgba(0,240,255,0.18); stroke-width:3.5; }
+.ht-ring {
+  fill:none; stroke:rgba(0,240,255,0.95); stroke-width:3.5;
+  stroke-linecap:round;
+  stroke-dasharray:119.4;   /* 2π × 19 */
+  stroke-dashoffset:119.4;
+  transform:rotate(-90deg); transform-origin:27px 27px;
+}
+#ht-count {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-family:'Orbitron',sans-serif; font-weight:700; font-size:14px;
+  color:rgba(0,240,255,0.95); line-height:1;
+}
+
+/* ─── PIXEL SIZE DISPLAY ─── */
+#pixel-info { position:absolute; top:60px; left:50%; transform:translateX(-50%); z-index:20; font-size:9px; letter-spacing:2px; color:var(--dim); pointer-events:none; opacity:0; transition:opacity 0.4s; }
+#pixel-info.show { opacity:1; }
